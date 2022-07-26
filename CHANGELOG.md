@@ -1,6 +1,9 @@
 # Changelog
 This document contains changes in this package with each version change.
-## [1.2.8] - 2020-10-21 (latest)
+## [1.2.12] - 2022-07-26 (latest)
+Add the `stylesPath` parameter like `stylesDir`, so that `stylesDir` can pass in the path of custom styles. `stylesPath` can be a string or array of strings (['filepath1','filepath2'])
+
+## [1.2.8] - 2020-10-21 
 Fixed Link buton border color
 Issue Fixed: https://github.com/mzohaibqc/antd-theme-generator/issues/64
 ## [1.2.7] - 2020-10-18

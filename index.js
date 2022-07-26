@@ -150,7 +150,7 @@ const reducePlugin = postcss.plugin("reducePlugin", () => {
         matched = true;
       }
 
-      // Removing transparent adds Link Button border color 
+      // Removing transparent adds Link Button border color
       // https://github.com/mzohaibqc/antd-theme-generator/issues/64
       // if (!matched && decl.value === 'transparent') {
       //   decl.remove();
@@ -290,9 +290,10 @@ function isValidColor(color, customColorRegexArray = []) {
     );
   }
   // eslint-disable-next-line
-  const isColor = /^(rgb|hsl|hsv)a?\((\d+%?(deg|rad|grad|turn)?[,\s]+){2,3}[\s\/]*[\d\.]+%?\)$/i.test(
-    color
-  );
+  const isColor =
+    /^(rgb|hsl|hsv)a?\((\d+%?(deg|rad|grad|turn)?[,\s]+){2,3}[\s\/]*[\d\.]+%?\)$/i.test(
+      color
+    );
   if (isColor) return true;
   if (customColorRegexArray.length > 0) {
     return customColorRegexArray.reduce((prev, regex) => {
@@ -303,10 +304,12 @@ function isValidColor(color, customColorRegexArray = []) {
 }
 
 async function compileAllLessFilesToCss(
-  stylesDir,
+  stylesDir=[],
+  stylesPath,
   antdStylesDir,
   varMap = {},
-  varPath
+  varPath,
+  rootEntryName = "default"
 ) {
   /*
     Get all less files path in styles directory
@@ -314,9 +317,14 @@ async function compileAllLessFilesToCss(
   */
   const stylesDirs = [].concat(stylesDir);
   let styles = [];
-  stylesDirs.forEach((s) => {
-    styles = styles.concat(glob.sync(path.join(s, "./**/*.less")));
-  });
+  if(stylesPath){
+    styles=[].concat(stylesPath)
+  }else{
+    stylesDirs.forEach((s) => {
+      styles = styles.concat(glob.sync(path.join(s, "./**/*.less")));
+    });
+  }
+
   const csss = await Promise.all(
     styles.map((filePath) => {
       let fileContent = fs.readFileSync(filePath).toString();
@@ -324,23 +332,30 @@ async function compileAllLessFilesToCss(
       // if (avoidDuplicates) fileContent = fileContent.replace(/@import\ ["'](.*)["'];/g, '\n');
       const r = /@import ["'](.*)["'];/g;
       const directory = path.dirname(filePath);
-      fileContent = fileContent.replace(r, function (
-        match,
-        importPath,
-        index,
-        content
-      ) {
-        if (!importPath.endsWith(".less")) {
-          importPath += ".less";
+      fileContent = fileContent.replace(
+        r,
+        function (match, importPath, index, content) {
+          if (!importPath.endsWith(".less")) {
+            importPath += ".less";
+          }
+          // this change is for dynamic theme file added in antd after 4.15.x
+          if (importPath.includes("@{root-entry-name}")) {
+            importPath = importPath.replace(
+              "@{root-entry-name}",
+              rootEntryName
+            );
+          } else {
+            return "";
+          }
+          const newPath = path.join(directory, importPath);
+          // If imported path/file already exists in styles paths then replace import statement with empty line
+          if (styles.indexOf(newPath) === -1) {
+            return match;
+          } else {
+            return "";
+          }
         }
-        const newPath = path.join(directory, importPath);
-        // If imported path/file already exists in styles paths then replace import statement with empty line
-        if (styles.indexOf(newPath) === -1) {
-          return match;
-        } else {
-          return "";
-        }
-      });
+      );
       Object.keys(varMap).forEach((varName) => {
         fileContent = fileContent.replace(
           new RegExp(`(:.*)(${varName})`, "g"),
@@ -349,8 +364,8 @@ async function compileAllLessFilesToCss(
           }
         );
       });
-      fileContent = `@import "${varPath}";\n${fileContent}`;
-      // fileContent = `@import "~antd/lib/style/themes/default.less";\n${fileContent}`;
+      // fileContent = `@import "${varPath}";\n${fileContent}`;
+      fileContent = `@import "~antd/lib/style/themes/default.less";\n@import "${varPath}";\n${fileContent}`;
       return less
         .render(fileContent, {
           paths: [antdStylesDir].concat(stylesDir),
@@ -369,6 +384,7 @@ async function compileAllLessFilesToCss(
     })
   );
   const hashes = {};
+
 
   return csss
     .map((c) => {
@@ -390,14 +406,16 @@ async function compileAllLessFilesToCss(
   By default color.less will be generated in /public directory
 */
 async function generateTheme({
-  antDir,
-  antdStylesDir,
-  stylesDir,
-  varFile,
-  outputFilePath,
-  themeVariables = ["@primary-color"],
-  customColorRegexArray = [],
-}) {
+                               antDir,
+                               antdStylesDir,
+                               stylesPath,//stylesPath will overwrite stylesDir
+                               stylesDir,
+                               varFile,
+                               outputFilePath,
+                               themeVariables = ["@primary-color"],
+                               customColorRegexArray = [],
+                               rootEntryName = "default",
+                             }) {
   try {
     const antdPath = antdStylesDir || path.join(antDir, "lib");
     const nodeModulesPath = path.join(
@@ -409,23 +427,37 @@ async function generateTheme({
     */
     const stylesDirs = [].concat(stylesDir);
     let styles = [];
-    stylesDirs.forEach((s) => {
-      styles = styles.concat(glob.sync(path.join(s, "./**/*.less")));
-    });
+    if(stylesPath){
+      styles=[].concat(stylesPath)
+    }else{
+      stylesDirs.forEach((s) => {
+        styles = styles.concat(glob.sync(path.join(s, "./**/*.less")));
+      });
+    }
 
-    const antdStylesFile = path.join(antDir, "./dist/antd.less"); // path.join(antdPath, './style/index.less');
-
+    let antdStylesFile;
+    if (rootEntryName === "default") {
+      antdStylesFile = path.join(antDir, "./dist/antd.less");
+    } else {
+      antdStylesFile = path.join(antDir, `./dist/antd.${rootEntryName}.less`);
+    }
     /*
       You own custom styles (Change according to your project structure)
 
       - stylesDir - styles directory containing all less files
       - varFile - variable file containing ant design specific and your own custom variables
     */
-    varFile = varFile || path.join(antdPath, "./style/themes/default.less");
+    varFile =
+      varFile || path.join(antdPath, `./style/themes/${rootEntryName}.less`);
 
     let content = "";
     styles.forEach((filePath) => {
-      content += fs.readFileSync(filePath).toString();
+      if (filePath.endsWith("themes/index.less")) {
+        const fileContent = fs.readFileSync(filePath).toString();
+        content += fileContent.replace("@{root-entry-name}", rootEntryName);
+      } else {
+        content += fs.readFileSync(filePath).toString();
+      }
     });
 
     const hashCode = hash.sha256().update(content).digest("hex");
@@ -443,7 +475,7 @@ async function generateTheme({
     Ant Design Specific Files (Change according to your project structure)
     You can even use different less based css framework and create color.less for  that
 
-    - antDir - ant design instalation path
+    - antDir - ant design installation path
     - entry - Ant Design less main file / entry file
     - styles - Ant Design less styles for each component
 
@@ -456,6 +488,7 @@ async function generateTheme({
     const varFileContent = combineLess(varFile, nodeModulesPath);
     let antdLess = await bundle({
       src: antdStylesFile,
+      rootVars: { "root-entry-name": rootEntryName },
     });
 
     customColorRegexArray = [
@@ -481,7 +514,7 @@ async function generateTheme({
           (randomColorsVars[color] && color === PRIMARY_RANDOM_COLOR) ||
           color === "#000000" ||
           color === "#ffffff"
-        ) {
+          ) {
           color = randomColor();
         }
       }
@@ -524,9 +557,10 @@ async function generateTheme({
       stylesDir,
       antdStylesDir,
       themeCompiledVars,
-      varFile
+      varFile,
+      rootEntryName
     );
-    let fadeMap = {};
+    const fadeMap = {};
     const fades = antdLess.match(/fade\(.*\)/g);
     if (fades) {
       fades.forEach((fade) => {
@@ -551,6 +585,7 @@ async function generateTheme({
       }
       varsCombined = `${varsCombined}\n${varName}: ${color};`;
     });
+
     COLOR_FUNCTIONS.slice(1).forEach((name) => {
       antdLess = antdLess.replace(
         new RegExp(`${name}\\((.*), \\d+%\\)`, "g"),
@@ -584,9 +619,6 @@ async function generateTheme({
         color = themeCompiledVars[varName];
       }
       color = color.replace("(", "\\(").replace(")", "\\)");
-      if (varName === "@slider-handle-color-focus") {
-        console.log("color", color, varName);
-      } 
       css = css.replace(new RegExp(color, "g"), varName);
     });
 
@@ -596,7 +628,6 @@ async function generateTheme({
     });
     COLOR_FUNCTIONS.forEach((name) => {
       css = css.replace(new RegExp(`~'(${name}\(.*\))'`), (a, b) => {
-        console.log("b", b);
         return b;
       });
     });
